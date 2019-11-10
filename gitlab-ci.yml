@@ -1,0 +1,37 @@
+# Variables List : 
+    # $SSH_PRIVATE_KEY
+    # $HOST_USER
+    # $HOST_IP
+    # $WORK_DIR
+    # $CLOUDFLARE_ZONE_ID
+    # $CLOUDFLARE_API_KEY
+stage_master_deploy:
+    tags:
+        - node
+    before_script: 
+        - 'which ssh-agent || ( apt-get update -y && apt-get install openssh-client wget curl -y )'
+        - eval $(ssh-agent -s)
+        - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add - > /dev/null
+        - mkdir -p ~/.ssh
+        - chmod 700 ~/.ssh
+        - '[[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config'
+        - 'wget -q -O - "https://yarnpkg.com/install.sh"| bash -s -- --version 1.19.1'
+        - 'TODAY=$(date +"%Y-%m-%d-%H%M")'
+
+    only:
+        - master
+    script:
+        - yarn install
+        - yarn run build
+        - cd ./dist && 
+          find . -iname '*.html' | xargs sed -i "s/VERSION/$TODAY/g" &&
+          tar --exclude='styleguide.html' --warning='no-file-changed' -cf checkout.tar . 
+        - scp -r checkout.tar $HOST_USER@$HOST_IP:$WORK_DIR
+        - ssh $HOST_USER@$HOST_IP "cd $WORK_DIR &&
+                                tar -xf checkout.tar &&
+                                rm checkout.tar &&
+                                find $WORK_DIR -type d -print0 | xargs -0 chmod 755 &&
+                                find $WORK_DIR -type f -print0 | xargs -0 chmod 644 &&
+                                chown -R www-data:www-data $WORK_DIR"
+        # If you use Cloudflare activate the below line 
+        # - bash ../cloudflare_purge_cache.sh $CLOUDFLARE_ZONE_ID $CLOUDFLARE_API_KEY
